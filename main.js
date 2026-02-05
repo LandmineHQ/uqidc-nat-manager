@@ -51,7 +51,14 @@
             if (type === 'del') {
                 body = `func=delNatAcl&id=${val}`;
             } else {
-                body = `name=${val}&ext_port=${val}&int_port=${val}&select-protocol=3&func=addNatAcl`;
+                if (val && typeof val === 'object') {
+                    const name = (val.name ?? "").toString();
+                    const extPort = val.ext_port ?? val.int_port ?? "";
+                    const intPort = val.int_port ?? val.ext_port ?? "";
+                    body = `name=${encodeURIComponent(name)}&ext_port=${extPort}&int_port=${intPort}&select-protocol=3&func=addNatAcl`;
+                } else {
+                    body = `name=${val}&ext_port=${val}&int_port=${val}&select-protocol=3&func=addNatAcl`;
+                }
             }
 
             try {
@@ -274,7 +281,7 @@
         }
 
         // UI 列表单删
-        async instantDelete(id, port, btn) {
+        async instantDelete(id, port, btn, editBtn) {
             if (!ContextHelper.ensureContext()) return;
             this.ui.log(`删除 ${port}...`, "info");
 
@@ -291,6 +298,69 @@
             } else {
                 this.ui.log(`❌ 删除失败 ${port}: ${res.msg}`, "error");
                 if (btn) { btn.disabled = false; btn.innerText = "×"; btn.style.opacity = "1"; }
+                if (editBtn) { editBtn.disabled = false; editBtn.style.opacity = "1"; }
+            }
+        }
+
+        // UI 单项编辑（先删后建）
+        async editItem(item, data, btns) {
+            if (!ContextHelper.ensureContext()) return;
+            if (!item || !item.id) return;
+            if (this.isRunning && !this.isPaused) { this.ui.log("请先暂停", "error"); return; }
+
+            const name = (data && data.name) ? data.name.toString().trim() : "";
+            const extPort = data ? parseInt(data.ext_port, 10) : NaN;
+            const intPort = data ? parseInt(data.int_port, 10) : NaN;
+            if (!name || isNaN(extPort) || isNaN(intPort)) {
+                this.ui.log("编辑参数无效", "error");
+                return;
+            }
+
+            const setBtnState = (disabled) => {
+                if (!btns) return;
+                const list = Array.isArray(btns) ? btns : [btns.editBtn, btns.delBtn];
+                list.filter(Boolean).forEach(b => { b.disabled = disabled; b.style.opacity = disabled ? 0.5 : "1"; });
+            };
+
+            try {
+                setBtnState(true);
+                this.ui.log(`编辑 ${item.internal} -> ${intPort}`, "info");
+
+                await this.limiter.wait();
+                const delRes = await API.request('del', item.id);
+                if (delRes.status !== 'success') {
+                    this.ui.log(`❌ 编辑失败(删除): ${delRes.msg}`, "error");
+                    const failTask = { type: 'del', value: { port: item.internal, id: item.id }, errorMsg: delRes.msg };
+                    this.failedItems.push(failTask);
+                    this.ui.renderFailed(this.failedItems);
+                    return;
+                }
+
+                const idx = this.inventory.findIndex(i => i.id == item.id);
+                if (idx !== -1) {
+                    this.parser.removeSynced(this.inventory[idx]);
+                    this.inventory.splice(idx, 1);
+                    this.ui.renderList(this.inventory);
+                }
+
+                await this.limiter.wait();
+                const addRes = await API.request('add', { name, ext_port: extPort, int_port: intPort });
+                if (addRes.status === 'success') {
+                    this.ui.log(`✅ 编辑成功 ${intPort}`, "success");
+                    const newItem = this.parser.addOptimistic(intPort);
+                    newItem.name = name;
+                    this.inventory.unshift(newItem);
+                    this.ui.renderList(this.inventory);
+                } else {
+                    this.ui.log(`❌ 编辑失败(创建): ${addRes.msg}`, "error");
+                    const failTask = { type: 'add', value: { name, ext_port: extPort, int_port: intPort }, errorMsg: addRes.msg };
+                    this.failedItems.push(failTask);
+                    this.ui.renderFailed(this.failedItems);
+                }
+            } catch (e) {
+                this.ui.log(`异常: ${e.message}`, "error");
+            } finally {
+                setBtnState(false);
             }
         }
 
@@ -305,7 +375,7 @@
                     await this.limiter.wait();
 
                     const isDel = task.type === 'del';
-                    const display = isDel ? task.value.port : task.value;
+                    const display = this.getTaskDisplay(task);
                     const reqVal = isDel ? task.value.id : task.value;
 
                     this.ui.log(`[W${wid}] ${isDel ? '删' : '增'}: ${display}`);
@@ -364,6 +434,17 @@
                 this.ui.updateProgress(0, 0);
             }
         }
+        getTaskDisplay(task) {
+            if (!task) return "";
+            if (task.type === 'del') {
+                const v = task.value;
+                if (v && typeof v === 'object') return v.port ?? v.id ?? "";
+                return v ?? "";
+            }
+            const v = task.value;
+            if (v && typeof v === 'object') return v.int_port ?? v.ext_port ?? v.name ?? "";
+            return v ?? "";
+        }
 
         start() {
             if (!ContextHelper.ensureContext()) return this.ui.log("未找到ID", "error");
@@ -412,7 +493,7 @@
                 .uq-list-item:hover { background: #2a2d2e; }
                 .uq-col-in { width: 50px; color: #fff; }
                 .uq-col-ex { flex: 1; color: #9cdcfe; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 5px; }
-                .uq-col-op { width: 30px; text-align: right; }
+                .uq-col-op { width: 70px; text-align: right; }
                 .uq-input { width: 100%; background: #3c3c3c; border: 1px solid #555; color: #fff; padding: 5px; border-radius: 3px; font-size: 12px; margin-bottom: 5px; box-sizing: border-box; }
                 .uq-btn { width: 100%; padding: 6px; border: none; border-radius: 3px; cursor: pointer; color: #fff; font-size: 12px; margin-bottom: 5px; }
                 .uq-btn-blue { background: #007acc; } .uq-btn-blue:hover { background: #0062a3; }
@@ -420,6 +501,7 @@
                 .uq-btn-green { background: #4caf50; font-weight:bold; } .uq-btn-green:hover { background: #43a047; }
                 .uq-btn-darkred { background: #800; } .uq-btn-darkred:hover { background: #a00; }
                 .uq-btn-yellow { background: #dcdcaa; color: #000; }
+                .uq-btn-gray { background: #555; color: #ddd; } .uq-btn-gray:hover { background: #666; }
                 .uq-btn-mini { padding: 2px 6px; font-size: 11px; width: auto; margin:0; }
                 #uq-progress-bg { height: 6px; background: #333; border-radius: 3px; overflow: hidden; margin-top:5px; }
                 #uq-progress-bar { height: 100%; width: 0%; background: #4caf50; transition: width 0.3s; }
@@ -433,6 +515,12 @@
                 #uq-modal { width: 320px; background: #1f1f1f; border: 1px solid #3c3c3c; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); padding: 12px; }
                 #uq-modal-text { font-size: 12px; color: #ddd; line-height: 1.5; margin-bottom: 10px; }
                 #uq-modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+                #uq-edit-mask { position: absolute; inset: 0; background: rgba(0,0,0,0.55); display: none; align-items: center; justify-content: center; z-index: 100000; }
+                #uq-edit { width: 340px; background: #1f1f1f; border: 1px solid #3c3c3c; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); padding: 12px; }
+                #uq-edit-title { font-size: 13px; color: #ddd; margin-bottom: 6px; font-weight: bold; }
+                .uq-edit-label { font-size: 11px; color: #999; margin: 6px 0 4px; }
+                #uq-edit-error { display: none; font-size: 11px; color: #f66; margin-top: 4px; }
+                #uq-edit-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
             `;
             const style = document.createElement("style"); style.textContent = css; document.head.appendChild(style);
             const div = document.createElement("div"); div.id = "uq-panel";
@@ -487,6 +575,22 @@
                         </div>
                     </div>
                 </div>
+                <div id="uq-edit-mask">
+                    <div id="uq-edit">
+                        <div id="uq-edit-title">编辑映射</div>
+                        <div class="uq-edit-label">名称</div>
+                        <input type="text" id="uq-edit-name" class="uq-input" placeholder="名称">
+                        <div class="uq-edit-label">外部端口 (ext_port)</div>
+                        <input type="number" id="uq-edit-ext" class="uq-input" placeholder="外部端口">
+                        <div class="uq-edit-label">内部端口 (int_port)</div>
+                        <input type="number" id="uq-edit-int" class="uq-input" placeholder="内部端口">
+                        <div id="uq-edit-error"></div>
+                        <div id="uq-edit-actions">
+                            <button id="uq-edit-cancel" class="uq-btn uq-btn-darkred uq-btn-mini">取消</button>
+                            <button id="uq-edit-ok" class="uq-btn uq-btn-green uq-btn-mini">保存</button>
+                        </div>
+                    </div>
+                </div>
             `;
             document.body.appendChild(div);
             this.el = div;
@@ -536,13 +640,31 @@
                 let btnHtml = "";
                 if (item.isNew) btnHtml = `<span style="color:#4caf50;font-size:10px">NEW</span>`;
                 else if (item.id) {
-                    const btn = document.createElement("button");
-                    btn.className = "uq-btn uq-btn-red uq-btn-mini"; btn.innerText = "×";
-                    btn.onclick = (e) => {
-                        e.target.disabled = true; e.target.style.opacity = 0.5;
-                        window.UqidcApp.uiTask.instantDelete(item.id, item.internal, e.target);
+                    const wrap = document.createElement("div");
+                    wrap.style.display = "flex";
+                    wrap.style.gap = "4px";
+                    wrap.style.justifyContent = "flex-end";
+
+                    const editBtn = document.createElement("button");
+                    editBtn.className = "uq-btn uq-btn-gray uq-btn-mini";
+                    editBtn.innerText = "改";
+                    editBtn.onclick = async () => {
+                        const data = await this.openEdit(item);
+                        if (!data) return;
+                        window.UqidcApp.uiTask.editItem(item, data, { editBtn, delBtn });
                     };
-                    btnHtml = btn;
+
+                    const delBtn = document.createElement("button");
+                    delBtn.className = "uq-btn uq-btn-red uq-btn-mini"; delBtn.innerText = "×";
+                    delBtn.onclick = (e) => {
+                        e.target.disabled = true; e.target.style.opacity = 0.5;
+                        editBtn.disabled = true; editBtn.style.opacity = 0.5;
+                        window.UqidcApp.uiTask.instantDelete(item.id, item.internal, e.target, editBtn);
+                    };
+
+                    wrap.appendChild(editBtn);
+                    wrap.appendChild(delBtn);
+                    btnHtml = wrap;
                 }
                 row.innerHTML = `<div class="uq-col-in">${item.internal}</div><div class="uq-col-ex" title="${item.external}">${item.external}</div><div class="uq-col-op"></div>`;
                 const op = row.querySelector(".uq-col-op");
@@ -556,7 +678,26 @@
             const box = this.el.querySelector("#uq-failed");
             if (!list || list.length === 0) { wrap.style.display = "none"; return; }
             wrap.style.display = "block";
-            box.innerHTML = list.map(t => `<div>${t.type === 'del' ? '删' : '增'} ${t.type === 'del' ? t.value.port : t.value} 失败 (${t.errorMsg || ''})</div>`).join("");
+            box.innerHTML = list.map(t => {
+                const label = this.formatFailedValue(t);
+                return `<div>${t.type === 'del' ? '删' : '增'} ${label} 失败 (${t.errorMsg || ''})</div>`;
+            }).join("");
+        }
+        formatFailedValue(task) {
+            if (!task) return "";
+            if (task.type === 'del') {
+                const v = task.value;
+                if (v && typeof v === 'object') return v.port ?? v.id ?? "";
+                return v ?? "";
+            }
+            const v = task.value;
+            if (v && typeof v === 'object') {
+                const intPort = v.int_port ?? "";
+                const extPort = v.ext_port ?? "";
+                if (intPort && extPort && intPort !== extPort) return `${intPort}/${extPort}`;
+                return intPort || extPort || v.name || "";
+            }
+            return v ?? "";
         }
 
         log(msg, type = "info") {
@@ -615,6 +756,80 @@
                     cleanup();
                     resolve(false);
                 };
+            });
+        }
+        guessExternalPort(item) {
+            if (!item) return "";
+            const raw = item.external !== undefined && item.external !== null ? String(item.external).trim() : "";
+            let match = raw.match(/:(\d+)\s*$/);
+            if (!match) match = raw.match(/^(\d+)\s*$/);
+            if (match) return parseInt(match[1], 10);
+            return item.internal ?? "";
+        }
+        openEdit(item) {
+            const mask = this.el.querySelector("#uq-edit-mask");
+            const nameIn = this.el.querySelector("#uq-edit-name");
+            const extIn = this.el.querySelector("#uq-edit-ext");
+            const intIn = this.el.querySelector("#uq-edit-int");
+            const err = this.el.querySelector("#uq-edit-error");
+            const okBtn = this.el.querySelector("#uq-edit-ok");
+            const cancelBtn = this.el.querySelector("#uq-edit-cancel");
+            let resolved = false;
+
+            const setError = (msg) => {
+                if (!err) return;
+                err.innerText = msg || "";
+                err.style.display = msg ? "block" : "none";
+            };
+            const cleanup = () => {
+                mask.style.display = "none";
+                okBtn.onclick = null;
+                cancelBtn.onclick = null;
+                mask.onclick = null;
+                nameIn.oninput = null;
+                extIn.oninput = null;
+                intIn.oninput = null;
+            };
+
+            return new Promise(resolve => {
+                const extGuess = this.guessExternalPort(item);
+                nameIn.value = item && item.name ? item.name : "";
+                extIn.value = extGuess !== "" ? extGuess : "";
+                intIn.value = item && item.internal !== undefined ? item.internal : "";
+                setError("");
+                mask.style.display = "flex";
+
+                const clearError = () => setError("");
+                nameIn.oninput = clearError;
+                extIn.oninput = clearError;
+                intIn.oninput = clearError;
+
+                okBtn.onclick = () => {
+                    if (resolved) return;
+                    const extPort = parseInt(extIn.value, 10);
+                    const intPort = parseInt(intIn.value, 10);
+                    if (isNaN(extPort) || isNaN(intPort)) { setError("端口必须是数字"); return; }
+                    if (extPort <= 0 || intPort <= 0) { setError("端口必须大于 0"); return; }
+                    const name = nameIn.value.trim() || String(extPort);
+                    resolved = true;
+                    cleanup();
+                    resolve({ name, ext_port: extPort, int_port: intPort });
+                };
+                cancelBtn.onclick = () => {
+                    if (resolved) return;
+                    resolved = true;
+                    cleanup();
+                    resolve(null);
+                };
+                mask.onclick = (e) => {
+                    if (e.target !== mask || resolved) return;
+                    resolved = true;
+                    cleanup();
+                    resolve(null);
+                };
+
+                nameIn.focus();
+                nameIn.select();
             });
         }
         show() { this.el.style.display = "flex"; }
