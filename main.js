@@ -250,8 +250,10 @@
             if (!ContextHelper.ensureContext()) { this.ui.log("无法获取 ID", "error"); return; }
             if (this.isRunning && !this.isPaused) { this.ui.log("请先暂停", "error"); return; }
 
-            const s = parseInt(start), e = end ? parseInt(end) : s;
-            if (isNaN(s)) return;
+            const s = parseInt(start);
+            const hasEnd = end !== undefined && end !== null && `${end}`.trim() !== "";
+            const e = hasEnd ? parseInt(end) : s;
+            if (isNaN(s) || (hasEnd && isNaN(e))) return;
 
             const newTasks = [];
             if (type === 'add') {
@@ -268,6 +270,7 @@
             this.totalTasks += newTasks.length;
             this.ui.updateProgress(this.completedTasks, this.totalTasks);
             this.ui.log(`添加 ${newTasks.length} 个任务`);
+            this.start();
         }
 
         // UI 列表单删
@@ -373,11 +376,19 @@
         pause() { this.isPaused = true; this.ui.setBtnState("paused"); }
         clear() { this.queue = []; this.totalTasks = 0; this.completedTasks = 0; this.ui.updateProgress(0, 0); this.ui.log("队列已清空", "warn"); }
         retry() {
+            if (this.failedItems.length === 0) return;
             this.queue.push(...this.failedItems);
             this.totalTasks += this.failedItems.length;
             this.failedItems = [];
             this.ui.renderFailed([]);
             this.ui.updateProgress(this.completedTasks, this.totalTasks);
+            this.start();
+        }
+        clearFailed() {
+            if (this.failedItems.length === 0) return;
+            this.failedItems = [];
+            this.ui.renderFailed([]);
+            this.ui.log("失败项已清空", "warn");
         }
     }
 
@@ -395,7 +406,8 @@
                 .uq-section-title { font-size: 11px; color: #888; margin-bottom: 4px; font-weight: bold; text-transform: uppercase; }
                 #uq-list-header { display: flex; padding: 6px 10px; background: #2d2d2d; font-size: 11px; color: #aaa; border-bottom: 1px solid #3c3c3c; align-items: center; }
                 #uq-btn-refresh { cursor: pointer; margin-left: auto; color: #00bcd4; font-weight: bold; }
-                #uq-list-scroll { flex: 1; overflow-y: auto; background: #181818; }
+                #uq-list-scroll { flex: 1; display: flex; flex-direction: column; background: #181818; overflow: hidden; }
+                #uq-list-body { flex: 1; overflow-y: auto; }
                 .uq-list-item { display: flex; align-items: center; padding: 5px 10px; border-bottom: 1px solid #2a2a2a; font-size: 12px; }
                 .uq-list-item:hover { background: #2a2d2e; }
                 .uq-col-in { width: 50px; color: #fff; }
@@ -412,7 +424,10 @@
                 #uq-progress-bg { height: 6px; background: #333; border-radius: 3px; overflow: hidden; margin-top:5px; }
                 #uq-progress-bar { height: 100%; width: 0%; background: #4caf50; transition: width 0.3s; }
                 #uq-log { height: 80px; overflow-y: auto; padding: 5px; font-size: 11px; color: #888; font-family: monospace; background: #111; border-top: 1px solid #3c3c3c; }
-                #uq-failed { display: none; background: #300; color: #f88; padding: 4px; font-size: 11px; margin-bottom: 5px; max-height: 50px; overflow-y: auto; }
+                #uq-failed-wrap { display: none; background: #1b1111; border-bottom: 1px solid #2a2a2a; padding: 6px 10px; }
+                #uq-failed { color: #f88; font-size: 11px; max-height: 60px; overflow-y: auto; }
+                #uq-failed-actions { display: flex; gap: 6px; margin-top: 6px; }
+                #uq-failed-actions .uq-btn { flex: 1; width: auto; }
                 #uq-version { position: absolute; right: 8px; bottom: 6px; font-size: 10px; color: #666; letter-spacing: 0.5px; pointer-events: none; }
                 #uq-modal-mask { position: absolute; inset: 0; background: rgba(0,0,0,0.55); display: none; align-items: center; justify-content: center; z-index: 100000; }
                 #uq-modal { width: 320px; background: #1f1f1f; border: 1px solid #3c3c3c; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); padding: 12px; }
@@ -429,20 +444,29 @@
                             <div class="uq-col-in">端口</div><div class="uq-col-ex">映射地址</div><div class="uq-col-op"></div>
                             <div id="uq-btn-refresh">⟳ 刷新</div>
                         </div>
-                        <div id="uq-list-scroll"><div style="padding:15px;text-align:center;color:#555">等待数据...</div></div>
+                        <div id="uq-list-scroll">
+                            <div id="uq-list-body">
+                                <div id="uq-failed-wrap">
+                                    <div id="uq-failed"></div>
+                                    <div id="uq-failed-actions">
+                                        <button id="uq-retry" class="uq-btn uq-btn-yellow">重试失败项</button>
+                                        <button id="uq-failed-clear" class="uq-btn uq-btn-darkred">清空失败项</button>
+                                    </div>
+                                </div>
+                                <div style="padding:15px;text-align:center;color:#555">等待数据...</div>
+                            </div>
+                        </div>
                     </div>
                     <div id="uq-right-col">
                         <div>
                             <div class="uq-section-title">批量配置</div>
                             <input type="number" id="uq-start" class="uq-input" placeholder="起始端口">
                             <input type="number" id="uq-end" class="uq-input" placeholder="结束 (选填)">
-                            <button id="uq-btn-add" class="uq-btn uq-btn-blue">＋ 添加创建</button>
-                            <button id="uq-btn-del" class="uq-btn uq-btn-red">－ 添加删除</button>
+                            <button id="uq-btn-add" class="uq-btn uq-btn-blue">＋ 创建</button>
+                            <button id="uq-btn-del" class="uq-btn uq-btn-red">－ 删除</button>
                         </div>
                         <div style="margin-top:auto">
                             <div class="uq-section-title">队列控制</div>
-                            <div id="uq-failed"></div>
-                            <button id="uq-retry" class="uq-btn uq-btn-yellow" style="display:none">重试失败项</button>
                             <div id="uq-progress-container">
                                 <div id="uq-progress-bg"><div id="uq-progress-bar"></div></div>
                                 <div id="uq-progress-text" style="font-size:10px;color:#aaa;text-align:center">0 / 0</div>
@@ -479,7 +503,7 @@
             };
             const sIn = this.el.querySelector("#uq-start");
             const eIn = this.el.querySelector("#uq-end");
-            const getRange = () => [parseInt(sIn.value), eIn.value ? parseInt(eIn.value) : parseInt(sIn.value)];
+            const getRange = () => [sIn.value, eIn.value];
 
             this.el.querySelector("#uq-btn-add").onclick = () => window.UqidcApp.uiTask.addBatch(...getRange(), 'add');
             this.el.querySelector("#uq-btn-del").onclick = () => window.UqidcApp.uiTask.addBatch(...getRange(), 'del');
@@ -490,12 +514,23 @@
             };
             this.el.querySelector("#uq-btn-clear").onclick = () => window.UqidcApp.uiTask.clear();
             this.el.querySelector("#uq-retry").onclick = () => window.UqidcApp.uiTask.retry();
+            this.el.querySelector("#uq-failed-clear").onclick = () => window.UqidcApp.uiTask.clearFailed();
         }
 
         renderList(list) {
-            const box = this.el.querySelector("#uq-list-scroll");
+            const box = this.el.querySelector("#uq-list-body");
+            const failedWrap = this.el.querySelector("#uq-failed-wrap");
             box.innerHTML = "";
-            if (!list || list.length === 0) { box.innerHTML = `<div style="padding:15px;text-align:center;color:#555">无数据</div>`; return; }
+            if (failedWrap) box.appendChild(failedWrap);
+            if (!list || list.length === 0) {
+                const empty = document.createElement("div");
+                empty.style.padding = "15px";
+                empty.style.textAlign = "center";
+                empty.style.color = "#555";
+                empty.innerText = "无数据";
+                box.appendChild(empty);
+                return;
+            }
             list.forEach(item => {
                 const row = document.createElement("div"); row.className = "uq-list-item";
                 let btnHtml = "";
@@ -517,9 +552,10 @@
         }
 
         renderFailed(list) {
-            const box = this.el.querySelector("#uq-failed"), btn = this.el.querySelector("#uq-retry");
-            if (list.length === 0) { box.style.display = "none"; btn.style.display = "none"; return; }
-            box.style.display = "block"; btn.style.display = "block";
+            const wrap = this.el.querySelector("#uq-failed-wrap");
+            const box = this.el.querySelector("#uq-failed");
+            if (!list || list.length === 0) { wrap.style.display = "none"; return; }
+            wrap.style.display = "block";
             box.innerHTML = list.map(t => `<div>${t.type === 'del' ? '删' : '增'} ${t.type === 'del' ? t.value.port : t.value} 失败 (${t.errorMsg || ''})</div>`).join("");
         }
 
