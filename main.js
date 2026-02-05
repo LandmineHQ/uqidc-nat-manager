@@ -3,6 +3,7 @@
     // 1. 公共组件 (配置、API、限流)
     // ============================================================
     const CONFIG = {
+        VERSION: "1.0.0",
         WORKER_COUNT: 2,
         MAX_RPS: 2,
         // 动态获取
@@ -412,6 +413,7 @@
                 #uq-progress-bar { height: 100%; width: 0%; background: #4caf50; transition: width 0.3s; }
                 #uq-log { height: 80px; overflow-y: auto; padding: 5px; font-size: 11px; color: #888; font-family: monospace; background: #111; border-top: 1px solid #3c3c3c; }
                 #uq-failed { display: none; background: #300; color: #f88; padding: 4px; font-size: 11px; margin-bottom: 5px; max-height: 50px; overflow-y: auto; }
+                #uq-version { position: absolute; right: 8px; bottom: 6px; font-size: 10px; color: #666; letter-spacing: 0.5px; pointer-events: none; }
             `;
             const style = document.createElement("style"); style.textContent = css; document.head.appendChild(style);
             const div = document.createElement("div"); div.id = "uq-panel";
@@ -447,6 +449,7 @@
                     </div>
                 </div>
                 <div id="uq-log"></div>
+                <div id="uq-version">v${CONFIG.VERSION}</div>
             `;
             document.body.appendChild(div);
             this.el = div;
