@@ -32,5 +32,5 @@
 
 ## 注意事项
 
-- 仅在 [UQIDC 客户面板](https://www.uqidc.com/clientarea) 页面使用，并确保 URL 带有 `id` 参数。
+- 仅在 <a href="https://www.uqidc.com/clientarea" target="_blank">🔗 UQIDC 客户面板</a> 页面使用，并确保 URL 带有 `id` 参数。
 - 首次打开面板会自动尝试刷新列表。
