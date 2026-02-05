@@ -414,6 +414,10 @@
                 #uq-log { height: 80px; overflow-y: auto; padding: 5px; font-size: 11px; color: #888; font-family: monospace; background: #111; border-top: 1px solid #3c3c3c; }
                 #uq-failed { display: none; background: #300; color: #f88; padding: 4px; font-size: 11px; margin-bottom: 5px; max-height: 50px; overflow-y: auto; }
                 #uq-version { position: absolute; right: 8px; bottom: 6px; font-size: 10px; color: #666; letter-spacing: 0.5px; pointer-events: none; }
+                #uq-modal-mask { position: absolute; inset: 0; background: rgba(0,0,0,0.55); display: none; align-items: center; justify-content: center; z-index: 100000; }
+                #uq-modal { width: 320px; background: #1f1f1f; border: 1px solid #3c3c3c; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); padding: 12px; }
+                #uq-modal-text { font-size: 12px; color: #ddd; line-height: 1.5; margin-bottom: 10px; }
+                #uq-modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
             `;
             const style = document.createElement("style"); style.textContent = css; document.head.appendChild(style);
             const div = document.createElement("div"); div.id = "uq-panel";
@@ -450,6 +454,15 @@
                 </div>
                 <div id="uq-log"></div>
                 <div id="uq-version">v${CONFIG.VERSION}</div>
+                <div id="uq-modal-mask">
+                    <div id="uq-modal">
+                        <div id="uq-modal-text"></div>
+                        <div id="uq-modal-actions">
+                            <button id="uq-modal-cancel" class="uq-btn uq-btn-darkred uq-btn-mini">取消</button>
+                            <button id="uq-modal-ok" class="uq-btn uq-btn-green uq-btn-mini">确定</button>
+                        </div>
+                    </div>
+                </div>
             `;
             document.body.appendChild(div);
             this.el = div;
@@ -460,8 +473,9 @@
         }
 
         bindEvents() {
-            this.el.querySelector("#uq-close").onclick = () => {
-                if (confirm("确定隐藏面板？(后台任务仍会运行)")) this.el.style.display = "none";
+            this.el.querySelector("#uq-close").onclick = async () => {
+                const ok = await this.confirm("确定隐藏面板？(后台任务仍会运行)");
+                if (ok) this.el.style.display = "none";
             };
             const sIn = this.el.querySelector("#uq-start");
             const eIn = this.el.querySelector("#uq-end");
@@ -528,6 +542,44 @@
             if (s === 'running') { btn.innerText = "暂停"; btn.className = "uq-btn uq-btn-yellow"; }
             else if (s === 'paused') { btn.innerText = "恢复"; btn.className = "uq-btn uq-btn-green"; }
             else { btn.innerText = "开始执行"; btn.className = "uq-btn uq-btn-green"; }
+        }
+        confirm(message) {
+            const mask = this.el.querySelector("#uq-modal-mask");
+            const text = this.el.querySelector("#uq-modal-text");
+            const okBtn = this.el.querySelector("#uq-modal-ok");
+            const cancelBtn = this.el.querySelector("#uq-modal-cancel");
+            let resolved = false;
+
+            const cleanup = () => {
+                mask.style.display = "none";
+                okBtn.onclick = null;
+                cancelBtn.onclick = null;
+                mask.onclick = null;
+            };
+
+            return new Promise(resolve => {
+                text.innerText = message;
+                mask.style.display = "flex";
+
+                okBtn.onclick = () => {
+                    if (resolved) return;
+                    resolved = true;
+                    cleanup();
+                    resolve(true);
+                };
+                cancelBtn.onclick = () => {
+                    if (resolved) return;
+                    resolved = true;
+                    cleanup();
+                    resolve(false);
+                };
+                mask.onclick = (e) => {
+                    if (e.target !== mask || resolved) return;
+                    resolved = true;
+                    cleanup();
+                    resolve(false);
+                };
+            });
         }
         show() { this.el.style.display = "flex"; }
         makeDraggable() {
